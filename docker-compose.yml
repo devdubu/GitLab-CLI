@@ -1,0 +1,77 @@
+services:
+  # ──────────────────────────── GitLab ────────────────────────────
+  # 기존 Self-hosted GitLab이 있다면 아래 블록은 주석 처리하고
+  # gl-net 네트워크만 공유하면 됩니다.
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    restart: unless-stopped
+    hostname: gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab'
+        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD:-changeme}'
+    ports:
+      - "80:80"
+      - "443:443"
+      - "22:22"
+    volumes:
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+    networks:
+      - gl-net
+    shm_size: "256m"
+
+  # ──────────────────────────── GitLab Admin CLI ────────────────────────────
+  gl-cli:
+    build: ./cli
+    container_name: gl-cli
+    restart: unless-stopped
+    environment:
+      - GITLAB_URL=${GITLAB_URL}
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      - VLLM_URL=${VLLM_URL}
+      - VLLM_MODEL=${VLLM_MODEL}
+      - EXPORT_DIR=/exports
+    volumes:
+      - ./exports:/exports
+    networks:
+      - gl-net
+    stdin_open: true
+    tty: true
+    # CLI 컨테이너는 슬립 상태로 대기 (exec로 접속하거나 Open WebUI에서 호출)
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+  # ──────────────────────────── Open WebUI ────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:latest
+    container_name: open-webui
+    restart: unless-stopped
+    volumes:
+      - open-webui-data:/app/backend/data
+      - ./openwebui/functions:/app/backend/data/functions
+    environment:
+      - OPENAI_API_BASE_URL=${VLLM_URL}/v1
+      - OPENAI_API_KEY=dummy
+      # GitLab CLI Function이 subprocess로 gl-cli를 실행할 때 필요
+      - GITLAB_URL=${GITLAB_URL}
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      - VLLM_URL=${VLLM_URL}
+      - VLLM_MODEL=${VLLM_MODEL}
+    ports:
+      - "3000:8080"
+    networks:
+      - gl-net
+    depends_on:
+      - gl-cli
+
+networks:
+  gl-net:
+    driver: bridge
+
+volumes:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:
+  open-webui-data:
